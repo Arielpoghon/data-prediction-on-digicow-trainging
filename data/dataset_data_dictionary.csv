@@ -1,0 +1,20 @@
+column_name,description
+ID,unique identifier for each farmer entry
+gender,Gender of the farmer
+age,Age category of the farmer
+registration,Registration method
+belong_to_cooperative,"Whether the farmer belongs to a cooperative (1 = yes, 0 = no)"
+county,County of residence
+subcounty,Sub-county of residence
+ward,Ward of residence
+trainer,Trainer who delivered the first training
+topics_list,List of possible training topics
+first_training_date,Date of the farmer’s first training
+num_trainings_30d,Trainings attended within 30 days of first training
+num_trainings_60d,Trainings attended within 60 days of first training
+num_total_trainings,Total trainings attended
+num_repeat_trainings,Trainings attended after the first
+days_to_second_training,Days between first and second training
+has_second_training,Whether a second training occurred
+num_unique_trainers,Number of distinct trainers engaged
+adopted_within_07_days,"Target: adoption within 07 days of first training (1 = yes, 0 = no)"
