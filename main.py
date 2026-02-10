@@ -1,142 +1,131 @@
-Indent mode
-Indent size
-Line wrap mode
-Editing main.py file contents
-Selection deleted
-34
-35
-36
-37
-38
-39
-40
-41
-42
-43
-44
-45
-46
-47
-48
-49
-50
-51
-52
-53
-54
-55
-56
-57
-58
-59
-60
-61
-62
-63
-64
-65
-66
-67
-68
-69
-70
-71
-72
-73
-74
-75
-76
-77
-78
-79
-80
-81
-82
-83
-84
-85
-86
-87
-88
-89
-90
-91
-92
-93
-94
-95
-96
-97
-98
-99
-100
-101
-ate_90, on='trainer')
+import os
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
+from sklearn.metrics import log_loss, roc_auc_score
+from sklearn.preprocessing import LabelEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from xgboost import XGBClassifier
+import warnings
+warnings.filterwarnings('ignore')
 
-param_dist = {
-    'learning_rate': [0.001, 0.005, 0.01, 0.05],
-    'num_leaves': [20, 50, 100, 200],
-    'max_depth': [3, 6, 10, 15],
-    'min_child_samples': [5, 10, 20, 30],
-    'n_estimators': [500, 1000, 1500, 2000],
-    'subsample': [0.7, 0.8, 0.9],
-    'colsample_bytree': [0.7, 0.8, 0.9],
-}
+# Set seed for reproducibility (required by Zindi rules)
+np.random.seed(42)
 
-def train_model(X, y):
-    lgb_model = LGBMClassifier(objective='binary', random_state=42, verbose=-1)
-    random_search = RandomizedSearchCV(
-        lgb_model, param_distributions=param_dist, n_iter=30, cv=skf, scoring='roc_auc', random_state=42, n_jobs=-1
-    )
-    random_search.fit(X, y)
-    best_params = random_search.best_params_
-    print("Best params:", best_params)
-    best_model = LGBMClassifier(**best_params, objective='binary', random_state=42, verbose=-1)
-    best_model.fit(X, y)
-    return best_model
+# Define data directory (relative path to match your file location)
+DATA_DIR = './data'
 
-# Train models for each time window
-model_07 = train_model(X, y_07)
-model_90 = train_model(X, y_90)
-model_120 = train_model(X, y_120)
+def load_csv(filename):
+    filepath = os.path.join(DATA_DIR, filename)
+    try:
+        return pd.read_csv(filepath)
+    except FileNotFoundError:
+        print(f"Error: File '{filename}' not found at '{filepath}'. Check the path and ensure the file exists.")
+        raise
 
-# Generate Test Predictions
-probs_07 = model_07.predict_proba(X_test)[:, 1]
-probs_90 = model_90.predict_proba(X_test)[:, 1]
-probs_120 = model_120.predict_proba(X_test)[:, 1]
+print("=== Advanced DigiCow Solution (XGBoost + TF-IDF) ===")
+print("Loading data...")
 
-# Calibration
-calibrated_07 = CalibratedClassifierCV(model_07, method='sigmoid', cv=skf)
-calibrated_07.fit(X, y_07)
-calibrated_probs_07 = calibrated_07.predict_proba(X_test)[:, 1]
+# Load data
+train = load_csv('Train.csv')
+test = load_csv('Test.csv')
+sample_sub = load_csv('SampleSubmission.csv')
 
-calibrated_90 = CalibratedClassifierCV(model_90, method='sigmoid', cv=skf)
-calibrated_90.fit(X, y_90)
-calibrated_probs_90 = calibrated_90.predict_proba(X_test)[:, 1]
+# Define targets
+targets = ['adopted_within_07_days', 'adopted_within_90_days', 'adopted_within_120_days']
 
-calibrated_120 = CalibratedClassifierCV(model_120, method='sigmoid', cv=skf)
-calibrated_120.fit(X, y_120)
-calibrated_probs_120 = calibrated_120.predict_proba(X_test)[:, 1]
+# Enhanced preprocessing with TF-IDF
+def preprocess(df):
+    # Feature engineering
+    if 'topics_list' in df.columns:
+        df['topics_count'] = df['topics_list'].fillna('').str.split(',').str.len()
+        # TF-IDF on topics
+        vectorizer = TfidfVectorizer(max_features=10, stop_words='english')
+        topics_tfidf = vectorizer.fit_transform(df['topics_list'].fillna(''))
+        tfidf_df = pd.DataFrame(topics_tfidf.toarray(), columns=[f'tfidf_{i}' for i in range(10)])
+        df = pd.concat([df, tfidf_df], axis=1)
+    if 'first_training_date' in df.columns:
+        df['first_training_date'] = pd.to_datetime(df['first_training_date'], errors='coerce')
+        df['training_month'] = df['first_training_date'].dt.month
+        df['training_dayofweek'] = df['first_training_date'].dt.dayofweek
+    if 'num_repeat_trainings' in df.columns and 'num_total_trainings' in df.columns:
+        df['repeat_ratio'] = df['num_repeat_trainings'] / (df['num_total_trainings'] + 1)
+    
+    # Impute and encode
+    num_cols = df.select_dtypes(include=[np.number]).columns
+    cat_cols = df.select_dtypes(include=['object']).columns
+    df[num_cols] = SimpleImputer(strategy='median').fit_transform(df[num_cols])
+    df[cat_cols] = df[cat_cols].fillna('Unknown')
+    
+    for col in cat_cols:
+        if col not in ['ID', 'topics_list']:  # Skip ID and processed topics
+            le = LabelEncoder()
+            df[col] = le.fit_transform(df[col].astype(str))
+    
+    # Robust drop: Only drop columns that exist
+    columns_to_drop = ['ID']
+    if 'topics_list' in df.columns:
+        columns_to_drop.append('topics_list')
+    if 'first_training_date' in df.columns:
+        columns_to_drop.append('first_training_date')
+    df = df.drop(columns_to_drop, axis=1, errors='ignore')  # errors='ignore' prevents KeyError
+    
+    for t in targets:
+        if t in df.columns:
+            df = df.drop(t, axis=1)
+    
+    return df
 
-# Clip probabilities to ensure they are within [0, 1]
-eps = 1e-6
-calibrated_probs_07 = np.clip(calibrated_probs_07, eps, 1 - eps)
-calibrated_probs_90 = np.clip(calibrated_probs_90, eps, 1 - eps)
-calibrated_probs_120 = np.clip(calibrated_probs_120, eps, 1 - eps)
+train_processed = preprocess(train.copy())
+test_processed = preprocess(test.copy())
 
-# Create Submission File
-submission = pd.DataFrame({
-    'ID': test['ID'],
-    'Target_07_AUC': calibrated_probs_07,
-    'Target_07_LogLoss': calibrated_probs_07,
-    'Target_90_AUC': calibrated_probs_90,
-    'Target_90_LogLoss': calibrated_probs_90,
-    'Target_120_AUC': calibrated_probs_120,
-    'Target_120_LogLoss': calibrated_probs_120
-})
+# Train models with tuning
+models = {}
+predictions = {}
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-# Save to CSV
-submission.to_csv('submission_final_v3.csv', index=False)
-print("✅ Submission file 'submission_final_v3.csv' created successfully!")
-print(f"Submission shape: {submission.shape}")
+for target in targets:
+    print(f"Training for {target}")
+    X = train_processed
+    y = train[target]
+    
+    # Hyperparameter tuning
+    param_grid = {
+        'max_depth': [3, 6],
+        'learning_rate': [0.1, 0.2],
+        'n_estimators': [100, 200]
+    }
+    xgb = XGBClassifier(scale_pos_weight=(len(y) - sum(y)) / sum(y), random_state=42)
+    grid_search = GridSearchCV(xgb, param_grid, cv=skf, scoring='roc_auc', n_jobs=-1)
+    grid_search.fit(X, y)
+    
+    model = grid_search.best_estimator_
+    print(f"  Best params: {grid_search.best_params_}")
+    
+    # CV scores
+    cv_scores = []
+    for train_idx, val_idx in skf.split(X, y):
+        model.fit(X.iloc[train_idx], y.iloc[train_idx])
+        y_pred_proba = model.predict_proba(X.iloc[val_idx])[:, 1]
+        auc = roc_auc_score(y.iloc[val_idx], y_pred_proba)
+        cv_scores.append(auc)
+    print(f"  CV ROC-AUC: {np.mean(cv_scores):.4f} (+/- {np.std(cv_scores):.4f})")
+    
+    # Final fit
+    model.fit(X, y)
+    models[target] = model
+    predictions[target] = model.predict_proba(test_processed)[:, 1]
 
+# Prepare submission
+sub = sample_sub.copy()
+sub['Target_07_AUC'] = predictions['adopted_within_07_days']
+sub['Target_07_LogLoss'] = predictions['adopted_within_07_days']
+sub['Target_90_AUC'] = predictions['adopted_within_90_days']
+sub['Target_90_LogLoss'] = predictions['adopted_within_90_days']
+sub['Target_120_AUC'] = predictions['adopted_within_120_days']
+sub['Target_120_LogLoss'] = predictions['adopted_within_120_days']
+
+# Save submission
+sub.to_csv('submission.csv', index=False)
+print("Submission saved as submission.csv")
