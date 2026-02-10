@@ -1,91 +1,77 @@
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import StratifiedKFold, RandomizedSearchCV
-from sklearn.metrics import roc_auc_score, log_loss
-from sklearn.calibration import CalibratedClassifierCV
-from lightgbm import LGBMClassifier
-import warnings
-
-warnings.filterwarnings('ignore')
-
-# Set seeds for reproducibility
-np.random.seed(42)
-import random
-random.seed(42)
-
-# Load Data
-train = pd.read_csv("data/Train.csv")
-test = pd.read_csv("data/Test.csv")
-
-# Feature Engineering
-train['num_topics'] = train['topics_list'].apply(lambda x: len(eval(x)) if pd.notnull(x) else 0)
-test['num_topics'] = test['topics_list'].apply(lambda x: len(eval(x)) if pd.notnull(x) else 0)
-
-for df in [train, test]:
-    df['first_training_date'] = pd.to_datetime(df['first_training_date'])
-    df['train_dayofweek'] = df['first_training_date'].dt.dayofweek
-    df['train_month'] = df['first_training_date'].dt.month
-    df['train_is_weekend'] = (df['train_dayofweek'] >= 5).astype(int)
-    df['county_trainer'] = df['county'] + '_' + df['trainer']
-    df['age_gender'] = df['age'] + '_' + df['gender']
-
-    # Additional time-based features
-    if 'days_to_second_training' in df.columns:
-        df['training_frequency'] = df['num_total_trainings'] / (df['days_to_second_training'].fillna(0) + 1)
-
-# Aggregated features
-county_adopt_rate_07 = train.groupby('county')['adopted_within_07_days'].mean().rename('county_adopt_rate_07')
-county_adopt_rate_90 = train.groupby('county')['adopted_within_90_days'].mean().rename('county_adopt_rate_90')
-county_adopt_rate_120 = train.groupby('county')['adopted_within_120_days'].mean().rename('county_adopt_rate_120')
-
-trainer_adopt_rate_07 = train.groupby('trainer')['adopted_within_07_days'].mean().rename('trainer_adopt_rate_07')
-trainer_adopt_rate_90 = train.groupby('trainer')['adopted_within_90_days'].mean().rename('trainer_adopt_rate_90')
-trainer_adopt_rate_120 = train.groupby('trainer')['adopted_within_120_days'].mean().rename('trainer_adopt_rate_120')
-
-train = train.join(county_adopt_rate_07, on='county')
-train = train.join(county_adopt_rate_90, on='county')
-train = train.join(county_adopt_rate_120, on='county')
-train = train.join(trainer_adopt_rate_07, on='trainer')
-train = train.join(trainer_adopt_rate_90, on='trainer')
-train = train.join(trainer_adopt_rate_120, on='trainer')
-
-test = test.join(county_adopt_rate_07, on='county')
-test = test.join(county_adopt_rate_90, on='county')
-test = test.join(county_adopt_rate_120, on='county')
-test = test.join(trainer_adopt_rate_07, on='trainer')
-test = test.join(trainer_adopt_rate_90, on='trainer')
-test = test.join(trainer_adopt_rate_120, on='trainer')
-
-# Select Features
-features = [
-    'gender', 'age', 'registration', 'belong_to_cooperative',
-    'num_total_trainings', 'num_repeat_trainings', 'days_to_second_training',
-    'num_unique_trainers', 'has_second_training', 'num_topics',
-    'train_dayofweek', 'train_month', 'train_is_weekend', 'county_trainer', 'age_gender',
-    'county_adopt_rate_07', 'county_adopt_rate_90', 'county_adopt_rate_120',
-    'trainer_adopt_rate_07', 'trainer_adopt_rate_90', 'trainer_adopt_rate_120'
-]
-
-if 'training_frequency' in train.columns:
-    features.append('training_frequency')
-
-X = train[features]
-X_test = test[features]
-
-# Define targets
-y_07 = train['adopted_within_07_days']
-y_90 = train['adopted_within_90_days']
-y_120 = train['adopted_within_120_days']
-
-# Handle Categorical Features
-categorical_cols = ['gender', 'age', 'registration', 'county_trainer', 'age_gender']
-
-for col in categorical_cols:
-    X[col] = X[col].astype('category')
-    X_test[col] = X_test[col].astype('category')
-
-# Hyperparameter Tuning with RandomizedSearchCV
-skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+Indent mode
+Indent size
+Line wrap mode
+Editing main.py file contents
+Selection deleted
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+ate_90, on='trainer')
 
 param_dist = {
     'learning_rate': [0.001, 0.005, 0.01, 0.05],
@@ -153,3 +139,4 @@ submission = pd.DataFrame({
 submission.to_csv('submission_final_v3.csv', index=False)
 print("✅ Submission file 'submission_final_v3.csv' created successfully!")
 print(f"Submission shape: {submission.shape}")
+
