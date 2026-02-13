@@ -70,9 +70,11 @@ def preprocess(df, is_train=True):
         df['repeat_ratio'] = df['num_repeat_trainings'] / (df['num_total_trainings'] + 1e-6)
     
     num_cols = df.select_dtypes(include=np.number).columns
+
     df[num_cols] = SimpleImputer(strategy='median').fit_transform(df[num_cols])
     
     cat_cols = df.select_dtypes(include='object').columns.drop('ID', errors='ignore')
+
     for col in cat_cols:
         if col != 'topics_list':
             df[col] = LabelEncoder().fit_transform(df[col].astype(str).fillna('missing'))
