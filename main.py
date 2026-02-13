@@ -11,7 +11,6 @@ from lightgbm import LGBMClassifier
 import warnings
 
 warnings.filterwarnings('ignore')
-
 np.random.seed(42)
 
 DATA_DIR = './data'
