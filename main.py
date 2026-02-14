@@ -18,8 +18,8 @@ DATA_DIR = './data'
 TARGETS = ['adopted_within_07_days', 'adopted_within_90_days', 'adopted_within_120_days']
 
 def load_file(filename):
-    path = os.path.join(DATA_DIR, filename)a
-    if not os.path.exists(path):
+    path = os.path.join(DATA_DIR, filename)
+    if not os.path.exists(path):b
         print(f"{filename} missing – download from Zindi!")
         return None
     return pd.read_csv(path)
