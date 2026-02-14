@@ -1,5 +1,5 @@
 import os
-import pandas as pd
+import pandas as pd c
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
@@ -19,7 +19,7 @@ TARGETS = ['adopted_within_07_days', 'adopted_within_90_days', 'adopted_within_1
 
 def load_file(filename):
     path = os.path.join(DATA_DIR, filename)
-    if not os.path.exists(path):b
+    if not os.path.exists(path):
         print(f"{filename} missing – download from Zindi!")
         return None
     return pd.read_csv(path)
