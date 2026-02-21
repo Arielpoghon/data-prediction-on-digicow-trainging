@@ -1,43 +1,4 @@
-()
-    stats['farmer_hist'] = farmer_hist
-
-    return stats
-
-
-def apply_features(df, stats, is_train=True):
-    """Apply all features to a dataframe."""
-    df = df.copy()
-    g = stats['global']
-    g07, g90, g120 = g['07'], g['90'], g['120']
-
-    # ── Session features ──
-    sess = stats['session']
-    ms = df[['session_key']].merge(sess, on='session_key', how='left')
-    df['sess_07_mean']  = ms['sess_07_mean'].fillna(g07).values
-    df['sess_90_mean']  = ms['sess_90_mean'].fillna(g90).values
-    df['sess_120_mean'] = ms['sess_120_mean'].fillna(g120).values
-    df['sess_07_sum']   = ms['sess_07_sum'].fillna(0).values
-    df['sess_90_sum']   = ms['sess_90_sum'].fillna(0).values
-    df['sess_120_sum']  = ms['sess_120_sum'].fillna(0).values
-    df['sess_n']        = ms['sess_n'].fillna(0).values
-    df['has_session']   = (df['sess_n'] > 0).astype(int)
-
-    # ── Trainer features (9 unique — very strong) ──
-    tr = stats['trainer']
-    df['trainer_07_rate']  = df['trainer_clean'].map(tr['tr07']).fillna(g07)
-    df['trainer_90_rate']  = df['trainer_clean'].map(tr['tr90']).fillna(g90)
-    df['trainer_120_rate'] = df['trainer_clean'].map(tr['tr120']).fillna(g120)
-
-    # ── Topic features ──
-    tp = stats['topic']
-    for pfx, gm in [('07',g07),('90',g90),('120',g120)]:
-        tm = tp[pfx]
-        df[f'topic_{pfx}_rate'] = df['topics'].apply(
-            lambda ts: np.mean([tm.get(t,gm) for t in ts]) if ts else gm)
-        df[f'topic_{pfx}_max'] = df['topics'].apply(
-            lambda ts: max([tm.get(t,gm) for t in ts], default=gm) if ts else gm)
-        df[f'topic_{pfx}_min'] = df['topics'].apply(
-            lambda ts: min([tm.get(t,gm) for t in ts], default=gm) if ts else gm)
+in([tm.get(t,gm) for t in ts], default=gm) if ts else gm)
 
     # ── Group features ──
     gs = stats['group']
