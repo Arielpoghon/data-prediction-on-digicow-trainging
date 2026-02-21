@@ -1,37 +1,4 @@
-s[col] = bsmooth(sess[col], sess['sess_n'], gm, k)
-    stats['session'] = sess
-
-    # ── 2. Trainer rates (only 9 trainers — huge signal) ──
-    tr = prior.groupby('trainer_clean').agg(
-        tr07=('adopted_within_07_days','mean'), tr90=('adopted_within_90_days','mean'),
-        tr120=('adopted_within_120_days','mean'), tr_n=('adopted_within_07_days','count'),
-    )
-    for col, gm in [('tr07',g07),('tr90',g90),('tr120',g120)]:
-        tr[col] = bsmooth(tr[col], tr['tr_n'], gm, k)
-    stats['trainer'] = tr
-
-    # ── 3. Topic rates (146 unique topics) ──
-    prior_tp = prior.explode('topics')
-    tp = {}
-    for tgt, pfx, gm in zip(TARGETS, PERIODS, [g07,g90,g120]):
-        agg = prior_tp.groupby('topics')[tgt].agg(['mean','count'])
-        agg['smooth'] = bsmooth(agg['mean'], agg['count'], gm, k)
-        tp[pfx] = agg['smooth'].to_dict()
-    stats['topic'] = tp
-
-    # ── 4. Group rates ──
-    gs = prior.groupby('group_name').agg(
-        g07=('adopted_within_07_days','mean'), g90=('adopted_within_90_days','mean'),
-        g120=('adopted_within_120_days','mean'), g_n=('adopted_within_07_days','count'),
-    )
-    for col, gm in [('g07',g07),('g90',g90),('g120',g120)]:
-        gs[col] = bsmooth(gs[col], gs['g_n'], gm, k)
-    stats['group'] = gs
-
-    # ── 5. Geo rates ──
-    for geo in ['county', 'subcounty', 'ward']:
-        geo_s = prior.groupby(geo).agg(
-            g07=('adopted_within_07_days','mean'), g90=('adopted_within_90_days','mean'),
+_within_07_days','mean'), g90=('adopted_within_90_days','mean'),
             g120=('adopted_within_120_days','mean'), g_n=('adopted_within_07_days','count'),
         )
         for col, gm in [('g07',g07),('g90',g90),('g120',g120)]:
