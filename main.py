@@ -1,37 +1,4 @@
- trainfx}_max']
-        sm    = df[f'sess_{pfx}_mean']
-        fh_m  = df[f'fh_mean_{pfx}']
-        fh_e  = df[f'fh_ever_{pfx}']
-        grp   = df[f'group_{pfx}_rate']
-        cnt   = df[f'county_{pfx}_rate']
-
-        df[f'tr_x_tp_{pfx}']       = tr_r * tp_r
-        df[f'tr_x_tpmax_{pfx}']    = tr_r * tp_mx
-        df[f'sess_x_tr_{pfx}']     = sm * tr_r
-        df[f'sess_x_tp_{pfx}']     = sm * tp_r
-        df[f'sess_x_grp_{pfx}']    = sm * grp
-        df[f'fh_x_tr_{pfx}']       = fh_m * tr_r
-        df[f'fh_x_tp_{pfx}']       = fh_m * tp_r
-        df[f'fh_x_sess_{pfx}']     = fh_m * sm
-        df[f'ever_x_tr_{pfx}']     = fh_e * tr_r
-        df[f'ever_x_tp_{pfx}']     = fh_e * tp_r
-        df[f'cnt_x_tr_{pfx}']      = cnt * tr_r
-        df[f'coop_x_tr_{pfx}']     = df['belong_to_cooperative'] * tr_r
-
-    return df
-
-
-def preprocess(train, test):
-    """Label encode and align features."""
-    all_data = pd.concat([train, test], ignore_index=True)
-
-    # Label encode
-    for col in ['gender', 'age', 'registration', 'county', 'subcounty', 'ward']:
-        if col in all_data.columns:
-            le = LabelEncoder()
-            all_data[col] = le.fit_transform(all_data[col].astype(str).fillna('missing'))
-
-    # Frequency encode group_name (864 groups — too many for label encode)
+oo many for label encode)
     freq = train['group_name'].value_counts(normalize=True)
     all_data['group_freq'] = all_data['group_name'].map(freq).fillna(0)
 
