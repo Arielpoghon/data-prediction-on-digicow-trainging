@@ -1,37 +1,4 @@
-in([tm.get(t,gm) for t in ts], default=gm) if ts else gm)
-
-    # ── Group features ──
-    gs = stats['group']
-    tmp = df[['group_name']].merge(gs[['g07','g90','g120']].reset_index(), on='group_name', how='left')
-    df['group_07_rate']  = tmp['g07'].fillna(g07).values
-    df['group_90_rate']  = tmp['g90'].fillna(g90).values
-    df['group_120_rate'] = tmp['g120'].fillna(g120).values
-
-    # ── Geo features ──
-    for geo in ['county', 'subcounty', 'ward']:
-        geo_s = stats[geo]
-        tmp = df[[geo]].merge(geo_s[['g07','g90','g120']].reset_index(), on=geo, how='left')
-        df[f'{geo}_07_rate']  = tmp['g07'].fillna(g07).values
-        df[f'{geo}_90_rate']  = tmp['g90'].fillna(g90).values
-        df[f'{geo}_120_rate'] = tmp['g120'].fillna(g120).values
-
-    # ── Month trend ──
-    df['month_key'] = df['training_day'].dt.to_period('M').astype(str)
-    mt = stats['month']
-    tmp = df[['month_key']].merge(mt, on='month_key', how='left')
-    df['month_trend_07']  = tmp['mt07'].fillna(g07).values
-    df['month_trend_90']  = tmp['mt90'].fillna(g90).values
-    df['month_trend_120'] = tmp['mt120'].fillna(g120).values
-    df.drop(columns=['month_key'], inplace=True)
-
-    # ── FARMER HISTORY (strongest feature!) ──
-    # For train: use only prior sessions BEFORE this training_day (strict <)
-    # For test: same — prior sessions before test training_day
-    fh = stats['farmer_hist']
-    tmp = df[['farmer_name', 'training_day']].merge(
-        fh, on='farmer_name', how='left'
-    )
-    # Days between last prior session and this training
+ training
     tmp['fh_days_since_last']  = (tmp['training_day'] - tmp['fh_last_date']).dt.days
     tmp['fh_days_since_first'] = (tmp['training_day'] - tmp['fh_first_date']).dt.days
     tmp['fh_training_freq']    = (tmp['fh_n_sessions'] /
