@@ -1,43 +1,4 @@
-"""
-DigiCow - Data-Informed Final Solution
-========================================
-
-KEY DISCOVERIES FROM DATA ANALYSIS:
-1. has_topic_trained_on == 0 → ZERO adoption in both train and prior (hard rule)
-2. Only 9 unique trainers → trainer is massively discriminative
-3. farmer_name overlap: 23.6% train, 62.7% TEST farmers have prior labeled history
-   → "ever adopted before" = 11.9% rate vs 0.96% baseline (12x signal!)
-4. Prior has distribution shift (2-4x higher rates than train/test)
-   → Don't train raw models on prior; use it ONLY for lookup stats + farmer history
-5. Session peer signal covers 95.9% train / 85.7% test
-6. Topics: only 146 unique, some have 0% adoption rate (strong negatives)
-7. Top trainer (TRA_rkvyofbh) has 3.9% 07-rate vs bottom (TRA_suiifsur) at 0.08%
-
-ARCHITECTURE:
-- has_topic_trained_on == 0 → predict global_rate * 0.01 (near-zero, not exactly 0)
-- For the rest: rich feature set + calibrated LightGBM/XGBoost ensemble
-- Farmer history (from Prior by farmer_name) is the #1 feature
-- No class_weight/scale_pos_weight → use sample_weight (fixes calibration)
-- Temperature scaling for final calibration
-"""
-
-import os, re, warnings
-import numpy as np
-import pandas as pd
-from sklearn.preprocessing import LabelEncoder
-from sklearn.impute import SimpleImputer
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import log_loss, roc_auc_score
-from sklearn.linear_model import LogisticRegression
-from sklearn.calibration import CalibratedClassifierCV
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier, early_stopping, log_evaluation
-from catboost import CatBoostClassifier
-warnings.filterwarnings('ignore')
-
-DATA_DIR = './data'
-TARGETS  = ['adopted_within_07_days', 'adopted_within_90_days', 'adopted_within_120_days']
-PERIODS  = ['07', '90', '120']
+""']
 N_FOLDS  = 7
 SEED     = 42
 np.random.seed(SEED)
