@@ -1,37 +1,4 @@
-015, depth=5,
-            l2_leaf_reg=5, bagging_temperature=0.3,
-            verbose=0, random_state=SEED,
-            early_stopping_rounds=150,
-        ),
-        XGBClassifier(
-            n_estimators=2000, max_depth=3, learning_rate=0.02,
-            subsample=0.75, colsample_bytree=0.65, min_child_weight=8,
-            reg_alpha=0.2, reg_lambda=3.0,
-            eval_metric='logloss', random_state=SEED+1, tree_method='hist',
-            n_jobs=-1, early_stopping_rounds=150,
-        ),
-        LGBMClassifier(
-            n_estimators=4000, learning_rate=0.01, num_leaves=95,
-            subsample=0.75, colsample_bytree=0.65, min_child_samples=15,
-            reg_alpha=0.02, reg_lambda=3.0, verbose=-1,
-            random_state=SEED+2, n_jobs=-1,
-        ),
-        # Logistic regression: best calibration anchor for log loss
-        LogisticRegression(C=0.05, max_iter=2000, random_state=SEED),
-    ]
-
-    n_models   = len(models)
-    oof_preds  = np.zeros((len(X_train), n_models))
-    test_preds = np.zeros((len(X_test),  n_models))
-
-    print(f"\n  [{tgt_name}] pos_rate={pos_rate:.5f}  ({int(y_arr.sum())}/{len(y_arr)})")
-
-    for i, model in enumerate(models):
-        oof_fold   = np.zeros(len(X_train))
-        test_fold  = np.zeros(len(X_test))
-
-        for tr_idx, val_idx in skf.split(X_train, y_arr):
-            X_tr, X_val = X_train.iloc[tr_idx], X_train.iloc[val_idx]
+iloc[tr_idx], X_train.iloc[val_idx]
             y_tr, y_val = y_arr[tr_idx], y_arr[val_idx]
             sw_tr = sw[tr_idx]
 
