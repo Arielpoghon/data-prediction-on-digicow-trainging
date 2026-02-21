@@ -1,36 +1,3 @@
-iloc[tr_idx], X_train.iloc[val_idx]
-            y_tr, y_val = y_arr[tr_idx], y_arr[val_idx]
-            sw_tr = sw[tr_idx]
-
-            if isinstance(model, XGBClassifier):
-                model.fit(X_tr, y_tr, sample_weight=sw_tr,
-                         eval_set=[(X_val, y_val)], verbose=False)
-            elif isinstance(model, LGBMClassifier):
-                model.fit(X_tr, y_tr, sample_weight=sw_tr,
-                         eval_set=[(X_val, y_val)],
-                         callbacks=[early_stopping(200, verbose=False),
-                                    log_evaluation(period=-1)])
-            elif isinstance(model, CatBoostClassifier):
-                model.fit(X_tr, y_tr, sample_weight=sw_tr,
-                         eval_set=(X_val, y_val), verbose=False)
-            else:
-                model.fit(X_tr, y_tr, sample_weight=sw_tr)
-
-            oof_fold[val_idx] += model.predict_proba(X_val)[:, 1]
-            test_fold         += model.predict_proba(X_test)[:, 1] / N_FOLDS
-
-        oof_preds[:, i]  = oof_fold
-        test_preds[:, i] = test_fold
-        ll  = log_loss(y_arr, oof_fold)
-        auc = roc_auc_score(y_arr, oof_fold)
-        print(f"    model {i:d}: ll={ll:.5f}  auc={auc:.5f}")
-
-    # Simple average
-    oof_avg  = oof_preds.mean(axis=1)
-    test_avg = test_preds.mean(axis=1)
-    ll_avg   = log_loss(y_arr, oof_avg)
-    auc_avg  = roc_auc_score(y_arr, oof_avg)
-    print(f"  Avg: ll={ll_avg:.5f}  auc={auc_avg:.5f}")
 
     # Optimal model weights via OOF
     best_w, best_ll_w = np.ones(n_models) / n_models, ll_avg
