@@ -1,36 +1,4 @@
- training
-    tmp['fh_days_since_last']  = (tmp['training_day'] - tmp['fh_last_date']).dt.days
-    tmp['fh_days_since_first'] = (tmp['training_day'] - tmp['fh_first_date']).dt.days
-    tmp['fh_training_freq']    = (tmp['fh_n_sessions'] /
-                                   (tmp['fh_days_since_first'].replace(0, np.nan) / 30)).fillna(0)
-
-    for col in ['fh_n_sessions','fh_ever_07','fh_ever_90','fh_ever_120',
-                'fh_mean_07','fh_mean_90','fh_mean_120',
-                'fh_sum_07','fh_sum_90','fh_sum_120',
-                'fh_days_since_last','fh_days_since_first','fh_training_freq']:
-        fill = 0
-        df[col] = tmp[col].fillna(fill).values
-
-    df['fh_has_history'] = (df['fh_n_sessions'] > 0).astype(int)
-    df['fh_log_days_since_last']  = np.log1p(df['fh_days_since_last'].clip(0))
-    df['fh_log_days_since_first'] = np.log1p(df['fh_days_since_first'].clip(0))
-
-    # ── Date features ──
-    df['td_month']   = df['training_day'].dt.month
-    df['td_dow']     = df['training_day'].dt.dayofweek
-    df['td_year']    = df['training_day'].dt.year
-    df['td_quarter'] = df['training_day'].dt.quarter
-    df['td_weeknum'] = df['training_day'].dt.isocalendar().week.astype(int)
-    df['td_dayofyear'] = df['training_day'].dt.dayofyear
-
-    # ── Topic count features ──
-    df['num_topics'] = df['topics'].apply(len)
-
-    # ── Interactions (trainer × topic × session × farmer history) ──
-    for pfx, gm in [('07',g07),('90',g90),('120',g120)]:
-        tr_r  = df[f'trainer_{pfx}_rate']
-        tp_r  = df[f'topic_{pfx}_rate']
-        tp_mx = df[f'topic_{pfx}_max']
+ trainfx}_max']
         sm    = df[f'sess_{pfx}_mean']
         fh_m  = df[f'fh_mean_{pfx}']
         fh_e  = df[f'fh_ever_{pfx}']
