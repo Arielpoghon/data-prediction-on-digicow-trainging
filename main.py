@@ -1,36 +1,4 @@
-_within_07_days','mean'), g90=('adopted_within_90_days','mean'),
-            g120=('adopted_within_120_days','mean'), g_n=('adopted_within_07_days','count'),
-        )
-        for col, gm in [('g07',g07),('g90',g90),('g120',g120)]:
-            geo_s[col] = bsmooth(geo_s[col], geo_s['g_n'], gm, k)
-        stats[geo] = geo_s
-
-    # ── 6. Month trend ──
-    prior['month_key'] = prior['training_day'].dt.to_period('M').astype(str)
-    mt = prior.groupby('month_key').agg(
-        mt07=('adopted_within_07_days','mean'),
-        mt90=('adopted_within_90_days','mean'),
-        mt120=('adopted_within_120_days','mean'),
-    ).reset_index()
-    stats['month'] = mt
-
-    # ── 7. Farmer-level history from Prior (by farmer_name) ──
-    # For each farmer: their past adoption record in Prior
-    # This is the STRONGEST signal: prior adopters → 12x baseline rate
-    farmer_hist = prior.groupby('farmer_name').agg(
-        fh_n_sessions     = ('training_day', 'count'),
-        fh_ever_07        = ('adopted_within_07_days', 'max'),
-        fh_ever_90        = ('adopted_within_90_days', 'max'),
-        fh_ever_120       = ('adopted_within_120_days', 'max'),
-        fh_mean_07        = ('adopted_within_07_days', 'mean'),
-        fh_mean_90        = ('adopted_within_90_days', 'mean'),
-        fh_mean_120       = ('adopted_within_120_days', 'mean'),
-        fh_sum_07         = ('adopted_within_07_days', 'sum'),
-        fh_sum_90         = ('adopted_within_90_days', 'sum'),
-        fh_sum_120        = ('adopted_within_120_days', 'sum'),
-        fh_last_date      = ('training_day', 'max'),
-        fh_first_date     = ('training_day', 'min'),
-    ).reset_index()
+()
     stats['farmer_hist'] = farmer_hist
 
     return stats
