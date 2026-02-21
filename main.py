@@ -1,48 +1,4 @@
-""']
-N_FOLDS  = 7
-SEED     = 42
-np.random.seed(SEED)
-
-
-# ─────────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────────
-
-def extract_trainer(s):
-    """Prior: plain 'TRA_xxx'. Train/Test: \"['TRA_xxx']\". Handle both."""
-    m = re.findall(r'TRA_\w+', str(s))
-    return m[0] if m else str(s).strip()
-
-def parse_topics(s):
-    if pd.isna(s): return []
-    items = re.findall(r"'([^']+)'", str(s))
-    return [x for x in items if x]
-
-def bsmooth(mean_s, count_s, gm, k=10):
-    return (mean_s * count_s + gm * k) / (count_s + k)
-
-def temperature_scale(probs, y_true, n_steps=300):
-    best_T, best_ll = 1.0, log_loss(y_true, probs)
-    for T in np.linspace(0.3, 8.0, n_steps):
-        p = np.clip(probs ** (1.0 / T), 1e-7, 1 - 1e-7)
-        ll = log_loss(y_true, p)
-        if ll < best_ll:
-            best_ll, best_T = ll, T
-    return best_T, best_ll
-
-
-# ─────────────────────────────────────────────────────────────
-# LOAD
-# ─────────────────────────────────────────────────────────────
-
-def load_data():
-    train  = pd.read_csv(os.path.join(DATA_DIR, 'Train.csv'))
-    test   = pd.read_csv(os.path.join(DATA_DIR, 'Test.csv'))
-    prior  = pd.read_csv(os.path.join(DATA_DIR, 'Prior.csv'))
-    sample = pd.read_csv(os.path.join(DATA_DIR, 'SampleSubmission.csv'))
-
-    for df in [train, test, prior]:
-        df['training_day'] = pd.to_datetime(df['training_day'], errors='coerce')
+_day'] = pd.to_datetime(df['training_day'], errors='coerce')
         df['trainer_clean'] = df['trainer'].apply(extract_trainer)
         df['topics']        = df['topics_list'].apply(parse_topics)
         df['session_key']   = df['training_day'].astype(str) + '||' + df['trainer_clean']
