@@ -1,38 +1,4 @@
-_day'] = pd.to_datetime(df['training_day'], errors='coerce')
-        df['trainer_clean'] = df['trainer'].apply(extract_trainer)
-        df['topics']        = df['topics_list'].apply(parse_topics)
-        df['session_key']   = df['training_day'].astype(str) + '||' + df['trainer_clean']
-
-    print(f"Train: {train.shape}, Test: {test.shape}, Prior: {prior.shape}")
-    print(f"Train sessions in Prior: {train['session_key'].isin(prior['session_key']).sum()}/{len(train)}")
-    print(f"Test  sessions in Prior: {test['session_key'].isin(prior['session_key']).sum()}/{len(test)}")
-    print(f"Test  farmers in Prior:  {test['farmer_name'].isin(prior['farmer_name']).sum()}/{len(test)}")
-    return train, test, prior, sample
-
-
-# ─────────────────────────────────────────────────────────────
-# FEATURE ENGINEERING
-# ─────────────────────────────────────────────────────────────
-
-def build_prior_stats(prior):
-    """All aggregate statistics derived from Prior only — no leakage."""
-    stats = {}
-    g07, g90, g120 = (prior[t].mean() for t in TARGETS)
-    stats['global'] = {'07': g07, '90': g90, '120': g120}
-    k = 10
-
-    # ── 1. Session peer stats ──
-    sess = prior.groupby('session_key').agg(
-        sess_07_mean  = ('adopted_within_07_days',  'mean'),
-        sess_90_mean  = ('adopted_within_90_days',  'mean'),
-        sess_120_mean = ('adopted_within_120_days', 'mean'),
-        sess_07_sum   = ('adopted_within_07_days',  'sum'),
-        sess_90_sum   = ('adopted_within_90_days',  'sum'),
-        sess_120_sum  = ('adopted_within_120_days', 'sum'),
-        sess_n        = ('adopted_within_07_days',  'count'),
-    ).reset_index()
-    for col, gm in [('sess_07_mean',g07),('sess_90_mean',g90),('sess_120_mean',g120)]:
-        sess[col] = bsmooth(sess[col], sess['sess_n'], gm, k)
+s[col] = bsmooth(sess[col], sess['sess_n'], gm, k)
     stats['session'] = sess
 
     # ── 2. Trainer rates (only 9 trainers — huge signal) ──
