@@ -1,184 +1,435 @@
-[['g07','g90','g120']].reset_index(), on=grp_col, how='left')
-            df[f'{grp_col}_07_rate']  = tmp['g07'].fillna(g['07']).values
-            df[f'{grp_col}_90_rate']  = tmp['g90'].fillna(g['90']).values
- 
-    y_arr = y.values if hasattr(y, 'values') else np.array(y)
-    pos_rate = y_arr.mean()
-    # sample_weight: same balance as class_weight but correct probability scale
-    sw = np.where(y_arr == 1, (1 - pos_rate) / pos_rate, 1.0)
+"""
+DigiCow — Targeted improvement over 0.9498
+Focus: better features for zero-history farmers + improved calibration
+"""
+import os, re, warnings
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import log_loss, roc_auc_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.calibration import CalibratedClassifierCV
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
+from scipy.stats import rankdata
 
+warnings.filterwarnings('ignore')
+np.random.seed(42)
+
+DATA_DIR = './data'
+TARGETS  = ['adopted_within_07_days', 'adopted_within_90_days', 'adopted_within_120_days']
+N_FOLDS  = 7
+SEED     = 42
+
+def parse_list(s):
+    if pd.isna(s) or not isinstance(s, str) or not s.strip():
+        return []
+    s = re.sub(r"[\[\]'\"]", '', s)
+    return [item.strip() for item in s.split(',') if item.strip()]
+
+def bsmooth(mean_s, count_s, gm, k=10):
+    return (mean_s * count_s + gm * k) / (count_s + k)
+
+def load_data():
+    train  = pd.read_csv(os.path.join(DATA_DIR, 'Train.csv'))
+    test   = pd.read_csv(os.path.join(DATA_DIR, 'Test.csv'))
+    prior  = pd.read_csv(os.path.join(DATA_DIR, 'Prior.csv'))
+    sample = pd.read_csv(os.path.join(DATA_DIR, 'SampleSubmission.csv'))
+    print("Sample columns:", list(sample.columns))
+    print(f"Train:{train.shape} Test:{test.shape} Prior:{prior.shape}")
+    return train, test, prior, sample
+
+def add_prior_features(train, test, prior):
+    for df in [train, test, prior]:
+        for dc in ['training_day', 'first_training_date']:
+            if dc in df.columns:
+                df[dc] = pd.to_datetime(df[dc], errors='coerce')
+        if 'topics_list' in df.columns:
+            df['topics_parsed'] = df['topics_list'].apply(parse_list)
+        if 'trainer' in df.columns:
+            df['trainer_parsed'] = df['trainer'].apply(parse_list)
+
+    k         = 10
+    global07  = prior['adopted_within_07_days'].mean()
+    global90  = prior['adopted_within_90_days'].mean()
+    global120 = prior['adopted_within_120_days'].mean()
+    print(f"  Base rates 07:{global07:.4f} 90:{global90:.4f} 120:{global120:.4f}")
+
+    prior_hist = prior[['farmer_name','training_day',
+                         'adopted_within_07_days','adopted_within_90_days',
+                         'adopted_within_120_days','has_topic_trained_on',
+                         'topics_parsed']].copy()
+
+    # ── per-farmer personal history ───────────────────────────────────────
+    for name, df in [('train', train), ('test', test)]:
+        curr   = df[['ID','farmer_name','training_day']].copy()
+        merged = curr.merge(prior_hist, on='farmer_name', how='left',
+                            suffixes=('','_prior'))
+        past   = merged[merged['training_day_prior'] < merged['training_day']].copy()
+
+        agg = past.groupby('ID').agg(
+            num_prior           = ('training_day_prior','count'),
+            prior_adopt_07      = ('adopted_within_07_days','mean'),
+            prior_adopt_90      = ('adopted_within_90_days','mean'),
+            prior_adopt_120     = ('adopted_within_120_days','mean'),
+            prior_adopt_07_std  = ('adopted_within_07_days','std'),
+            prior_adopt_90_std  = ('adopted_within_90_days','std'),
+            prior_adopt_120_std = ('adopted_within_120_days','std'),
+            prior_adopt_07_sum  = ('adopted_within_07_days','sum'),
+            prior_adopt_90_sum  = ('adopted_within_90_days','sum'),
+            prior_adopt_120_sum = ('adopted_within_120_days','sum'),
+            prior_has_topic     = ('has_topic_trained_on','mean'),
+            last_prior          = ('training_day_prior','max'),
+            first_prior         = ('training_day_prior','min'),
+        ).reset_index()
+
+        # topic repeat ratio
+        curr_topics = df[['ID','topics_parsed']].set_index('ID')
+        past_topics = past.groupby('ID')['topics_parsed'].apply(
+            lambda x: set(t for lst in x for t in lst))
+        def topic_overlap(row):
+            fid  = row['ID']
+            cur  = set(curr_topics.loc[fid,'topics_parsed']) if fid in curr_topics.index else set()
+            hist = past_topics.get(fid, set())
+            return len(cur & hist) / len(cur) if cur else 0.0
+        agg['topic_repeat_ratio'] = agg.apply(topic_overlap, axis=1)
+
+        # last-3-session momentum
+        recent  = past.sort_values('training_day_prior').groupby('ID').tail(3)
+        rec_agg = recent.groupby('ID').agg(
+            recent_adopt_07  = ('adopted_within_07_days','mean'),
+            recent_adopt_90  = ('adopted_within_90_days','mean'),
+            recent_adopt_120 = ('adopted_within_120_days','mean'),
+        ).reset_index()
+        agg = agg.merge(rec_agg, on='ID', how='left')
+
+        agg = agg.merge(curr[['ID','training_day']], on='ID')
+        agg['days_since_last']  = (agg['training_day'] - agg['last_prior']).dt.days
+        agg['days_since_first'] = (agg['training_day'] - agg['first_prior']).dt.days
+        agg['log_days_since_last']  = np.log1p(agg['days_since_last'])
+        agg['log_days_since_first'] = np.log1p(agg['days_since_first'])
+        agg['training_freq'] = (
+            agg['num_prior'] / (agg['days_since_first'].replace(0,np.nan)/30)
+        ).fillna(0)
+        agg.drop(columns=['last_prior','first_prior','training_day',
+                           'days_since_last','days_since_first'], inplace=True)
+
+        df = df.merge(agg, on='ID', how='left')
+        for c in [col for col in agg.columns if col != 'ID']:
+            if c in df.columns:
+                df[c] = df[c].fillna(0)
+        if name == 'train': train = df
+        else:               test  = df
+
+    # flag: does this farmer have any personal history?
+    for df in [train, test]:
+        df['has_history'] = (df['num_prior'] > 0).astype(int)
+
+    n_tr = train['has_history'].sum()
+    n_te = test['has_history'].sum()
+    print(f"  Farmers with history — train:{n_tr}/{len(train)}  test:{n_te}/{len(test)}")
+
+    # ── trainer rates (Bayesian-smoothed) ────────────────────────────────
+    prior['trainer_parsed'] = prior['trainer'].apply(parse_list)
+    prior_exp_tr = prior.explode('trainer_parsed')
+    tr_stats = prior_exp_tr.groupby('trainer_parsed').agg(
+        tr07 = ('adopted_within_07_days','mean'),
+        tr90 = ('adopted_within_90_days','mean'),
+        tr120= ('adopted_within_120_days','mean'),
+        tr_n = ('adopted_within_07_days','count'),
+    )
+    for col, gm in [('tr07',global07),('tr90',global90),('tr120',global120)]:
+        tr_stats[col] = bsmooth(tr_stats[col], tr_stats['tr_n'], gm, k)
+
+    for df in [train, test]:
+        for attr, gm, cname in [('tr07',global07,'trainer_07_rate'),
+                                  ('tr90',global90,'trainer_90_rate'),
+                                  ('tr120',global120,'trainer_120_rate')]:
+            df[cname] = df['trainer_parsed'].apply(
+                lambda ts: np.mean([tr_stats.loc[t,attr]
+                                    for t in ts if t in tr_stats.index]) if ts else gm)
+        df['trainer_07_max'] = df['trainer_parsed'].apply(
+            lambda ts: max([tr_stats.loc[t,'tr07']
+                            for t in ts if t in tr_stats.index], default=global07))
+        # trainer consistency: std across trainers in session
+        df['trainer_07_std'] = df['trainer_parsed'].apply(
+            lambda ts: np.std([tr_stats.loc[t,'tr07']
+                               for t in ts if t in tr_stats.index]) if len(ts)>1 else 0.0)
+
+    # ── topic rates (Bayesian-smoothed) ──────────────────────────────────
+    prior['topics_parsed'] = prior['topics_list'].apply(parse_list)
+    prior_exp_tp = prior.explode('topics_parsed')
+
+    for tgt in TARGETS:
+        period = tgt.split('_')[-2]
+        gm     = prior[tgt].mean()
+        tp_agg = prior_exp_tp.groupby('topics_parsed')[tgt].agg(['mean','count'])
+        tp_agg['smooth'] = bsmooth(tp_agg['mean'], tp_agg['count'], gm, k)
+        tp_map = tp_agg['smooth'].to_dict()
+        for df in [train, test]:
+            df[f'topic_{period}_rate'] = df['topics_parsed'].apply(
+                lambda ts: np.mean([tp_map.get(t,gm) for t in ts]) if ts else gm)
+            df[f'topic_{period}_max']  = df['topics_parsed'].apply(
+                lambda ts: max([tp_map.get(t,gm) for t in ts], default=gm) if ts else gm)
+            df[f'topic_{period}_std']  = df['topics_parsed'].apply(
+                lambda ts: np.std([tp_map.get(t,gm) for t in ts]) if len(ts)>1 else 0.0)
+            df[f'trainer_topic_{period}'] = (df[f'topic_{period}_rate'] *
+                                              df[f'trainer_{period}_rate'])
+
+    # ── group rates (Bayesian-smoothed) ──────────────────────────────────
+    grp = prior.groupby('group_name').agg(
+        g07=('adopted_within_07_days','mean'),
+        g90=('adopted_within_90_days','mean'),
+        g120=('adopted_within_120_days','mean'),
+        g_n=('adopted_within_07_days','count'),
+    ).reset_index()
+    for col,gm in [('g07',global07),('g90',global90),('g120',global120)]:
+        grp[col] = bsmooth(grp[col], grp['g_n'], gm, k)
+    grp.rename(columns={'g07':'group_07_rate','g90':'group_90_rate',
+                         'g120':'group_120_rate'}, inplace=True)
+    for df in [train, test]:
+        tmp = df[['group_name']].merge(
+            grp[['group_name','group_07_rate','group_90_rate','group_120_rate']],
+            on='group_name', how='left')
+        df['group_07_rate']  = tmp['group_07_rate'].fillna(global07).values
+        df['group_90_rate']  = tmp['group_90_rate'].fillna(global90).values
+        df['group_120_rate'] = tmp['group_120_rate'].fillna(global120).values
+
+    # ── county rates (KEY for zero-history farmers) ───────────────────────
+    for geo_col, prefix in [('county','cnt'), ('subcounty','sub'), ('ward','wrd')]:
+        if geo_col in prior.columns:
+            geo_agg = prior.groupby(geo_col).agg(
+                g07=('adopted_within_07_days','mean'),
+                g90=('adopted_within_90_days','mean'),
+                g120=('adopted_within_120_days','mean'),
+                g_n=('adopted_within_07_days','count'),
+            ).reset_index()
+            for col,gm in [('g07',global07),('g90',global90),('g120',global120)]:
+                geo_agg[col] = bsmooth(geo_agg[col], geo_agg['g_n'], gm, k)
+            for df in [train, test]:
+                tmp = df[[geo_col]].merge(geo_agg[[geo_col,'g07','g90','g120']],
+                                           on=geo_col, how='left')
+                df[f'{prefix}_07_rate']  = tmp['g07'].fillna(global07).values
+                df[f'{prefix}_90_rate']  = tmp['g90'].fillna(global90).values
+                df[f'{prefix}_120_rate'] = tmp['g120'].fillna(global120).values
+
+    return train, test
+
+def preprocess(train, test):
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    for df in [train, test]:
+        df['topics_text']  = df['topics_parsed'].apply(lambda x: ' '.join(x) if x else '')
+        df['num_topics']   = df['topics_parsed'].apply(len)
+        df['num_trainers'] = df['trainer_parsed'].apply(len)
+
+    vec = TfidfVectorizer(max_features=150, ngram_range=(1,2),
+                          stop_words='english', min_df=2)
+    tf_tr = vec.fit_transform(train['topics_text'])
+    tf_te = vec.transform(test['topics_text'])
+    tf_cols = [f'tfidf_{i}' for i in range(tf_tr.shape[1])]
+    train = pd.concat([train, pd.DataFrame(tf_tr.toarray(), columns=tf_cols, index=train.index)], axis=1)
+    test  = pd.concat([test,  pd.DataFrame(tf_te.toarray(), columns=tf_cols, index=test.index)],  axis=1)
+    for df in [train, test]:
+        tfc = [c for c in df.columns if c.startswith('tfidf_')]
+        df['tfidf_mean'] = df[tfc].mean(axis=1)
+        df['tfidf_max']  = df[tfc].max(axis=1)
+        df['tfidf_sum']  = df[tfc].sum(axis=1)
+
+    for df in [train, test]:
+        for dc, pfx in [('training_day','td'),('first_training_date','ftd')]:
+            if dc in df.columns:
+                dt = df[dc]
+                df[f'{pfx}_month']   = dt.dt.month
+                df[f'{pfx}_dow']     = dt.dt.dayofweek
+                df[f'{pfx}_year']    = dt.dt.year
+                df[f'{pfx}_quarter'] = dt.dt.quarter
+                df[f'{pfx}_weeknum'] = dt.dt.isocalendar().week.astype(int)
+        if 'training_day' in df.columns and 'first_training_date' in df.columns:
+            df['days_since_first_training']     = (df['training_day'] - df['first_training_date']).dt.days.fillna(0)
+            df['log_days_since_first_training'] = np.log1p(df['days_since_first_training'])
+
+    # geo frequency encoding
+    for col in ['county','subcounty','ward']:
+        if col in train.columns:
+            freq = np.log1p(train[col].value_counts(normalize=True))
+            train[f'{col}_freq'] = train[col].map(freq).fillna(0)
+            test[f'{col}_freq']  = test[col].map(freq).fillna(0)
+
+    for col in ['gender','age','registration','group_name',
+                'belong_to_cooperative','has_topic_trained_on']:
+        if col in train.columns:
+            le = LabelEncoder()
+            combined = pd.concat([train[col], test[col]]).astype(str).fillna('missing')
+            le.fit(combined)
+            train[col] = le.transform(train[col].astype(str).fillna('missing'))
+            test[col]  = le.transform(test[col].astype(str).fillna('missing'))
+
+    for df in [train, test]:
+        for period in ['07','90','120']:
+            pa  = df.get(f'prior_adopt_{period}', pd.Series(0, index=df.index))
+            tr  = df.get(f'trainer_{period}_rate', pd.Series(0, index=df.index))
+            tp  = df.get(f'topic_{period}_rate', pd.Series(0, index=df.index))
+            tpx = df.get(f'topic_{period}_max', pd.Series(0, index=df.index))
+            grp = df.get(f'group_{period}_rate', pd.Series(0, index=df.index))
+            cnt = df.get(f'cnt_{period}_rate', pd.Series(0, index=df.index))
+            sub = df.get(f'sub_{period}_rate', pd.Series(0, index=df.index))
+
+            df[f'age_prior_{period}']         = df['age'] * pa
+            df[f'gender_topic_{period}']      = df['gender'] * tp
+            df[f'num_prior_topic_{period}']   = df['num_prior'] * tp
+            df[f'trainer_topic_max_{period}'] = tr * tpx
+            df[f'group_topic_{period}']       = grp * tp
+            df[f'group_x_trainer_{period}']   = grp * tr
+            # geo interactions — key for zero-history farmers
+            df[f'county_x_trainer_{period}']  = cnt * tr
+            df[f'county_x_topic_{period}']    = cnt * tp
+            df[f'sub_x_trainer_{period}']     = sub * tr
+            # zero-history specific: geo + group consensus
+            df[f'geo_group_{period}']         = cnt * grp
+
+        df['num_prior_x_topics']  = df['num_prior'] * df['num_topics']
+        df['is_repeat_topic']     = (df.get('topic_repeat_ratio',0) > 0).astype(int)
+        df['adopt_consistency']   = df.get('prior_adopt_90',0) - df.get('prior_adopt_07',0)
+        df['adopt_accel']         = df.get('prior_adopt_120',0) - df.get('prior_adopt_90',0)
+        # how much does this farmer's trainer outperform their county?
+        df['trainer_vs_county']   = df.get('trainer_07_rate',0) - df.get('cnt_07_rate',0)
+        df['group_vs_county']     = df.get('group_07_rate',0)   - df.get('cnt_07_rate',0)
+
+    drop = ['ID','farmer_name','training_day','first_training_date',
+            'trainer','topics_list','topics_parsed','trainer_parsed',
+            'topics_text','county','subcounty','ward','group_name']
+    train_proc = train.drop(columns=[c for c in drop if c in train.columns], errors='ignore')
+    test_proc  = test.drop( columns=[c for c in drop if c in test.columns],  errors='ignore')
+    for tgt in TARGETS:
+        if tgt in train_proc.columns:
+            train_proc = train_proc.drop(columns=[tgt])
+
+    common     = train_proc.columns.intersection(test_proc.columns)
+    train_proc = train_proc[common]
+    test_proc  = test_proc[common]
+
+    imputer    = SimpleImputer(strategy='median')
+    train_proc = pd.DataFrame(imputer.fit_transform(train_proc), columns=train_proc.columns)
+    test_proc  = pd.DataFrame(imputer.transform(test_proc),      columns=test_proc.columns)
+    print(f"  Feature count: {train_proc.shape[1]}")
+    return train_proc, test_proc
+
+def train_stack_model(X, y, tgt_name):
+    pos_weight = (len(y) - y.sum()) / max(y.sum(), 1)
     skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
 
-    models = [
+    base_models = [
         XGBClassifier(
-            n_estimators=3000, max_depth=4, learning_rate=0.015,
-            subsample=0.8, colsample_bytree=0.7, min_child_weight=5,
-            gamma=0.05, reg_alpha=0.1, reg_lambda=2.0,
+            n_estimators=1600, max_depth=5, learning_rate=0.02,
+            subsample=0.8, colsample_bytree=0.7, colsample_bylevel=0.8,
+            min_child_weight=5, gamma=0.1, reg_alpha=0.1, reg_lambda=1.0,
             eval_metric='logloss', random_state=SEED, tree_method='hist',
-            n_jobs=-1, early_stopping_rounds=150,
+            scale_pos_weight=pos_weight, n_jobs=-1,
         ),
         LGBMClassifier(
-            n_estimators=3000, learning_rate=0.015, num_leaves=63,
+            n_estimators=1800, learning_rate=0.02, num_leaves=50,
             subsample=0.8, colsample_bytree=0.7, min_child_samples=20,
-            reg_alpha=0.05, reg_lambda=2.0, verbose=-1,
-            random_state=SEED, n_jobs=-1,
+            reg_alpha=0.1, reg_lambda=1.0, verbose=-1,
+            random_state=SEED, class_weight='balanced', n_jobs=-1,
         ),
         CatBoostClassifier(
-            iterations=2500, learning_rate=0.015, depth=5,
-            l2_leaf_reg=5, bagging_temperature=0.3,
-            verbose=0, random_state=SEED, early_stopping_rounds=150,
+            iterations=1600, learning_rate=0.02, depth=6,
+            l2_leaf_reg=5, bagging_temperature=0.5,
+            verbose=0, random_state=SEED,
+            class_weights=[1, float(pos_weight)],
         ),
         XGBClassifier(
-            n_estimators=2000, max_depth=3, learning_rate=0.02,
-            subsample=0.75, colsample_bytree=0.65, min_child_weight=8,
-            reg_alpha=0.2, reg_lambda=3.0,
+            n_estimators=1200, max_depth=3, learning_rate=0.03,
+            subsample=0.7, colsample_bytree=0.6,
+            min_child_weight=10, reg_alpha=0.5,
             eval_metric='logloss', random_state=SEED+1, tree_method='hist',
-            n_jobs=-1, early_stopping_rounds=150,
+            scale_pos_weight=pos_weight, n_jobs=-1,
         ),
         LGBMClassifier(
-            n_estimators=4000, learning_rate=0.01, num_leaves=95,
+            n_estimators=2000, learning_rate=0.015, num_leaves=80,
             subsample=0.75, colsample_bytree=0.65, min_child_samples=15,
-            reg_alpha=0.02, reg_lambda=3.0, verbose=-1,
-            random_state=SEED+2, n_jobs=-1,
+            reg_alpha=0.05, reg_lambda=2.0, verbose=-1,
+            random_state=SEED+2, class_weight='balanced', n_jobs=-1,
         ),
-        LogisticRegression(C=0.05, max_iter=2000, random_state=SEED),
     ]
+    n_base    = len(base_models)
+    oof_preds = np.zeros((X.shape[0], n_base))
 
-    n_m = len(models)
-    oof  = np.zeros((len(X_train), n_m))
-    test_p = np.zeros((len(X_test),  n_m))
+    print(f"  OOF for {tgt_name}  (pos_weight={pos_weight:.1f})")
+    for i, model in enumerate(base_models):
+        oof_fold = np.zeros(X.shape[0])
+        for tr, val in skf.split(X, y):
+            model.fit(X.iloc[tr], y.iloc[tr])
+            oof_fold[val] = model.predict_proba(X.iloc[val])[:,1]
+        oof_preds[:,i] = oof_fold
+        print(f"    model {i}: ll={log_loss(y,oof_fold):.4f}  auc={roc_auc_score(y,oof_fold):.4f}")
 
-    print(f"\n  [{name}] pos={pos_rate:.5f} ({int(y_arr.sum())}/{len(y_arr)})")
+    meta = LogisticRegression(C=1.0, class_weight='balanced', max_iter=1000)
+    meta.fit(oof_preds, y)
+    meta_probs = meta.predict_proba(oof_preds)[:,1]
+    print(f"  META ll={log_loss(y,meta_probs):.4f}  auc={roc_auc_score(y,meta_probs):.4f}")
 
-    for i, model in enumerate(models):
-        oof_fold  = np.zeros(len(X_train))
-        test_fold = np.zeros(len(X_test))
+    # Platt scaling (sigmoid) for LogLoss — more stable than isotonic with rare positives
+    calibrator = CalibratedClassifierCV(meta, method='sigmoid', cv='prefit')
+    calibrator.fit(oof_preds, y)
+    cal_probs = calibrator.predict_proba(oof_preds)[:,1]
+    print(f"  CALIB ll={log_loss(y,cal_probs):.4f}")
 
-        for tr_idx, val_idx in skf.split(X_train, y_arr):
-            Xtr, Xval = X_train.iloc[tr_idx], X_train.iloc[val_idx]
-            ytr, yval = y_arr[tr_idx], y_arr[val_idx]
-            swtr = sw[tr_idx]
+    print("  Refitting on full data...")
+    for model in base_models:
+        model.fit(X, y)
+    return base_models, meta, calibrator
 
-            if isinstance(model, XGBClassifier):
-                model.fit(Xtr, ytr, sample_weight=swtr,
-                         eval_set=[(Xval, yval)], verbose=False)
-            elif isinstance(model, LGBMClassifier):
-                model.fit(Xtr, ytr, sample_weight=swtr,
-                         eval_set=[(Xval, yval)],
-                         callbacks=[lgb.early_stopping(200, verbose=False),
-                                    lgb.log_evaluation(-1)])
-            elif isinstance(model, CatBoostClassifier):
-                model.fit(Xtr, ytr, sample_weight=swtr,
-                         eval_set=(Xval, yval), verbose=False)
-            else:
-                model.fit(Xtr, ytr, sample_weight=swtr)
-
-            oof_fold[val_idx] = model.predict_proba(Xval)[:, 1]
-            test_fold        += model.predict_proba(X_test)[:, 1] / N_FOLDS
-
-        oof[:, i]   = oof_fold
-        test_p[:, i]= test_fold
-        ll  = log_loss(y_arr, oof_fold)
-        auc = roc_auc_score(y_arr, oof_fold)
-        print(f"    m{i}: ll={ll:.5f}  auc={auc:.5f}")
-
-    # Optimal blend weights using OOF
-    oof_avg  = oof.mean(axis=1)
-    test_avg = test_p.mean(axis=1)
-    ll_avg   = log_loss(y_arr, oof_avg)
-    auc_avg  = roc_auc_score(y_arr, oof_avg)
-    print(f"  Avg: ll={ll_avg:.5f}  auc={auc_avg:.5f}")
-
-    # Find optimal LR weight (calibration anchor)
-    best_w_lr, best_ll_w = 0.0, ll_avg
-    for w_lr in np.linspace(0.0, 0.5, 21):
-        w = np.array([(1-w_lr)/(n_m-1)]*(n_m-1) + [w_lr])
-        blend = np.clip((oof * w).sum(axis=1), 1e-7, 1-1e-7)
-        ll_w  = log_loss(y_arr, blend)
-        if ll_w < best_ll_w:
-            best_ll_w, best_w_lr = ll_w, w_lr
-
-    w_final  = np.array([(1-best_w_lr)/(n_m-1)]*(n_m-1) + [best_w_lr])
-    oof_bl   = np.clip((oof   * w_final).sum(axis=1), 1e-7, 1-1e-7)
-    test_bl  = np.clip((test_p* w_final).sum(axis=1), 1e-7, 1-1e-7)
-    print(f"  Weighted (lr_w={best_w_lr:.2f}): ll={log_loss(y_arr,oof_bl):.5f}")
-
-    # Temperature scaling
-    best_T = temperature_scale(oof_bl, y_arr)
-    test_final = np.clip(test_bl ** (1.0 / best_T), 1e-7, 1-1e-7)
-    oof_temp   = np.clip(oof_bl  ** (1.0 / best_T), 1e-7, 1-1e-7)
-    ll_final = log_loss(y_arr, oof_temp)
-    auc_final = roc_auc_score(y_arr, oof_temp)
-    print(f"  Temp T={best_T:.2f}: ll={ll_final:.5f}  auc={auc_final:.5f}")
-
-    return test_final, oof_temp, y_arr
-
-
-# ─────────────────────────────────────────────────────────────
-# MAIN
-# ─────────────────────────────────────────────────────────────
+def predict_stack(base_models, meta, calibrator, X_test):
+    base_preds = np.column_stack([m.predict_proba(X_test)[:,1] for m in base_models])
+    ranks      = np.column_stack([rankdata(base_preds[:,i]) for i in range(base_preds.shape[1])])
+    rank_avg   = ranks.mean(axis=1)
+    auc_pred     = np.clip(rank_avg / rank_avg.max(), 1e-6, 1-1e-6)
+    logloss_pred = np.clip(calibrator.predict_proba(base_preds)[:,1], 1e-6, 1-1e-6)
+    return auc_pred, logloss_pred
 
 def main():
-    print("Loading...")
+    print("Loading data...")
     train, test, prior, sample = load_data()
 
-    print("\nBuilding features...")
-    train_f, test_f = build_features(train, test, prior)
+    print("Building features...")
+    train, test = add_prior_features(train, test, prior)
 
-    # Attach targets for preprocess
-    for t in TARGETS:
-        train_f[t] = train[t].values
+    print("Preprocessing...")
+    train_proc, test_proc = preprocess(train, test)
 
-    print("\nPreprocessing...")
-    train_proc, test_proc = preprocess(train_f, test_f, train)
-    test_ids = test['ID'].values
-
-    # has_topic_trained_on == 0 → guaranteed 0 adoption (verified in data)
-    no_topic_test = (test['has_topic_trained_on'] == 0).values
-    print(f"\nhas_topic=0 in test: {no_topic_test.sum()} (will floor predictions)")
-
-    preds  = {}
-    oof_r  = {}
+    submission_auc     = {}
+    submission_logloss = {}
 
     for tgt in TARGETS:
-        print(f"\n{'='*60}\n{tgt}")
+        print(f"\n{'='*60}\nTarget: {tgt}\n{'='*60}")
         y = train[tgt].reset_index(drop=True)
-        p, oof, y_arr = train_predict(train_proc, y, test_proc, tgt)
-        gm = prior[tgt].mean()
-        # Floor has_topic=0 farmers (historically zero adoption)
-        p[no_topic_test] = gm * 0.05
-        preds[tgt] = p
-        oof_r[tgt] = (oof, y_arr)
+        base_models, meta, calibrator = train_stack_model(train_proc, y, tgt)
+        auc_pred, ll_pred = predict_stack(base_models, meta, calibrator, test_proc)
+        submission_auc[tgt]     = auc_pred
+        submission_logloss[tgt] = ll_pred
 
-    # Summary
-    print("\n" + "="*60)
-    print("OOF SUMMARY")
-    total = 0
-    for tgt in TARGETS:
-        oof, y = oof_r[tgt]
-        ll  = log_loss(y, oof)
-        auc = roc_auc_score(y, oof)
-        comp = 0.75*(1-ll) + 0.25*auc
-        total += comp / 3
-        print(f"  {tgt}: ll={ll:.5f}  auc={auc:.5f}  → {comp:.5f}")
-    print(f"  ESTIMATED SCORE: {total:.5f}")
-
-    # Build submission
     sub = sample[['ID']].copy()
-    sub['Target_07_AUC']      = preds['adopted_within_07_days']
-    sub['Target_90_AUC']      = preds['adopted_within_90_days']
-    sub['Target_120_AUC']     = preds['adopted_within_120_days']
-    sub['Target_07_LogLoss']  = preds['adopted_within_07_days']
-    sub['Target_90_LogLoss']  = preds['adopted_within_90_days']
-    sub['Target_120_LogLoss'] = preds['adopted_within_120_days']
+    sub['Target_07_AUC']      = submission_auc['adopted_within_07_days']
+    sub['Target_90_AUC']      = submission_auc['adopted_within_90_days']
+    sub['Target_120_AUC']     = submission_auc['adopted_within_120_days']
+    sub['Target_07_LogLoss']  = submission_logloss['adopted_within_07_days']
+    sub['Target_90_LogLoss']  = submission_logloss['adopted_within_90_days']
+    sub['Target_120_LogLoss'] = submission_logloss['adopted_within_120_days']
 
-    assert list(sub.columns) == list(sample.columns), \
-        f"Column mismatch: {list(sub.columns)} vs {list(sample.columns)}"
+    expected = list(sample.columns)
+    actual   = list(sub.columns)
+    if expected != actual:
+        raise ValueError(f"Column mismatch!\n  Expected: {expected}\n  Got: {actual}")
 
-    sub.to_csv('submission_final.csv', index=False)
-    print(f"\n✓ Saved submission_final.csv ({len(sub)} rows)")
-    print(sub.describe())
-
+    out_path = 'submission_final.csv'
+    sub.to_csv(out_path, index=False)
+    print(f"\n✓ Saved {out_path}  ({len(sub)} rows)")
+    print(sub.head())
 
 if __name__ == '__main__':
     main()
