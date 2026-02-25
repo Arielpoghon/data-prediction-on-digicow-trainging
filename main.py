@@ -136,7 +136,7 @@ def add_prior_features(train, test, prior):
     prior['trainer_parsed'] = prior['trainer'].apply(parse_list)
     prior_exp_tr = prior.explode('trainer_parsed')
     tr_stats = prior_exp_tr.groupby('trainer_parsed').agg(
-        tr07 = ('adopted_within_07_days','mean'),
+        tr07 = ('adopted_within_07_days','mean'), 
         tr90 = ('adopted_within_90_days','mean'),
         tr120= ('adopted_within_120_days','mean'),
         tr_n = ('adopted_within_07_days','count'),
