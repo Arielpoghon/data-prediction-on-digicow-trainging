@@ -28,7 +28,7 @@ def parse_list(s):
     if pd.isna(s) or not isinstance(s, str) or not s.strip():  
         return []  
     s = re.sub(r"[\[\]'\"]", '', s) 
-    return [item.strip() for item in s.split(',') if item.strip()]
+    return [item.strip() for item in s.split(',') if item.strip()] 
 
 def bsmooth(mean_s, count_s, gm, k=10):
     return (mean_s * count_s + gm * k) / (count_s + k)
