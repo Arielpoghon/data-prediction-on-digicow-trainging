@@ -17,7 +17,7 @@ from catboost import CatBoostClassifier
 from scipy.stats import rankdata
 
 warnings.filterwarnings('ignore')
-np.random.seed(42)
+np.random.seed(42) 
 
 DATA_DIR = './data'
 TARGETS  = ['adopted_within_07_days', 'adopted_within_90_days', 'adopted_within_120_days'] 
