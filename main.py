@@ -30,7 +30,7 @@ def parse_list(s):
     s = re.sub(r"[\[\]'\"]", '', s) 
     return [item.strip() for item in s.split(',') if item.strip()] 
 
-def bsmooth(mean_s, count_s, gm, k=10):
+def bsmooth(mean_s, count_s, gm, k=10): 
     return (mean_s * count_s + gm * k) / (count_s + k)
 
 def load_data():
