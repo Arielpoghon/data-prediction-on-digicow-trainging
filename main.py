@@ -21,7 +21,7 @@ np.random.seed(42)
 
 DATA_DIR = './data' 
 TARGETS  = ['adopted_within_07_days', 'adopted_within_90_days', 'adopted_within_120_days'] 
-N_FOLDS  = 7
+N_FOLDS  = 7 
 SEED     = 42 
 
 def parse_list(s):
