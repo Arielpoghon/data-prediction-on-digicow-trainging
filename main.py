@@ -429,7 +429,7 @@ def main():
     out_path = 'submission_final.csv'
     sub.to_csv(out_path, index=False)
     print(f"\n✓ Saved {out_path}  ({len(sub)} rows)") 
-    print(sub.head())
+    print(sub.head() )
 
 if __name__ == '__main__':
     main()
