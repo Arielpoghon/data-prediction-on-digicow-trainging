@@ -1,5 +1,5 @@
 """
-DigiCow — Targeted improvement over 0.9498
+DigiCow Data Prediction
 Focus: better features for zero-history farmers + improved calibration
 """this
 import os, re, warnings
