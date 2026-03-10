@@ -216,7 +216,7 @@ def add_prior_features(train, test, prior):
                 df[f'{prefix}_90_rate']  = tmp['g90'].fillna(global90).values
                 df[f'{prefix}_120_rate'] = tmp['g120'].fillna(global120).values
 
-    return train, test
+    return train,test
 
 def preprocess(train, test):
     from sklearn.feature_extraction.text import TfidfVectorizer
