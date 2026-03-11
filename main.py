@@ -11,18 +11,18 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import log_loss, roc_auc_score 
 from sklearn.linear_model import LogisticRegression   
 from sklearn.calibration import CalibratedClassifierCV 
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-from catboost import CatBoostClassifier
-from scipy.stats import rankdata
+from xgboost import XGBClassifier 
+from lightgbm import LGBMClassifier 
+from catboost import CatBoostClassifier 
+from scipy.stats import rankdata 
 
-warnings.filterwarnings('ignore')
-np.random.seed(42) 
+warnings.filterwarnings('ignore') 
+np.random.seed(42)  
 
-DATA_DIR = './data' 
+DATA_DIR = './data'  
 TARGETS  = ['adopted_within_07_days', 'adopted_within_90_days', 'adopted_within_120_days'] 
-N_FOLDS  = 7 
-SEED     = 42 
+N_FOLDS  = 7  
+SEED     = 42  
 
 def parse_list(s):
     if pd.isna(s) or not isinstance(s, str) or not s.strip():  
