@@ -10,6 +10,7 @@ ADD ONLY these two new features to build_features():
    - fh_ever_07/90/120: has this farmer ever adopted before?
    - fh_mean_07/90/120: their historical adoption rate
    - fh_n: how many prior sessions
+
    
 2. TRAIN SESSION DATA for TEST only:
    - For test: sess_mean = (prior_sum + train_sum) / (prior_n + train_n)
