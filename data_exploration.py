@@ -5,6 +5,7 @@ DigiCow - PATCH for original 0.9499 model
 DO NOT CHANGE the original architecture.
 ADD ONLY these two new features to build_features():
 
+
 1. FARMER HISTORY (fh_*): from Prior by farmer_name
    - fh_ever_07/90/120: has this farmer ever adopted before?
    - fh_mean_07/90/120: their historical adoption rate
